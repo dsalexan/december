@@ -1,0 +1,24 @@
+{
+  "name": "@december/gca",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "eslint-config-december": "workspace:*",
+    "tsconfig": "workspace:*"
+  },
+  "dependencies": {
+    "@december/churchill": "workspace:*",
+    "@december/utils": "workspace:^",
+    "mathjs": "^11.11.1",
+    "mout": "^1.2.4",
+    "zod": "^3.22.2",
+    "zod-to-ts": "^1.2.0"
+  }
+}

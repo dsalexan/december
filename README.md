@@ -19,7 +19,7 @@ This Turborepo includes the following packages/apps:
 - `docs`: a [Next.js](https://nextjs.org/) app
 - `web`: another [Next.js](https://nextjs.org/) app
 - `ui`: a stub React component library shared by both `web` and `docs` applications
-- `eslint-config-custom`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
+- `eslint-config-december`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
 - `tsconfig`: `tsconfig.json`s used throughout the monorepo
 
 Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
@@ -79,3 +79,8 @@ Learn more about the power of Turborepo:
 - [Filtering](https://turbo.build/repo/docs/core-concepts/monorepos/filtering)
 - [Configuration Options](https://turbo.build/repo/docs/reference/configuration)
 - [CLI Usage](https://turbo.build/repo/docs/reference/command-line-reference)
+
+
+
+
+pnpm add <package_name>
