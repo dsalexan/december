@@ -270,7 +270,7 @@ export class TraitErrorManager {
               if (KEYS_NOT_NOT_HIGHLIGHT_TYPE_IN_UNSCHEMAED_KEYS.includes(tagName)) tagColor = chalk.white.bold.bgRedBright
 
               log.add(tagColor(` ` + tagName.padEnd(PAD_TAG_NAME + 1, ` `)))
-            } else log.add(` `.repeat(PAD_TAG_NAME))
+            } else log.add(` `.repeat(PAD_TAG_NAME + 2))
 
             const section = allSections[i]
             const errors = bySection[section]
@@ -295,19 +295,33 @@ export class TraitErrorManager {
                 .join(`,`)}${suffix}]::${pipeline}`
             })
 
-            let types = [`too complex...`] as any
-            let typeColor = chalk.grey.italic
+            const uniqTypes = [] as any
 
+            let typeColor = chalk.grey.italic
             if (!KEYS_TO_HIDE_TYPE_IN_UNSCHEMAED_KEYS.includes(tagName)) {
-              types = uniq(errors.map(error => error.type))
-              typeColor = types.length > 3 ? chalk.bgRed : types.length > 1 ? chalk.bgYellow : chalk.white
+              // eslint-disable-next-line no-control-regex
+              const ANSI = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g
+
+              const uniqTypesClean = [] as any
+
+              for (const { type } of errors) {
+                const cleanType = type?.replace(ANSI, ``)
+                if (uniqTypesClean.includes(cleanType!)) continue
+
+                uniqTypesClean.push(cleanType)
+                uniqTypes.push(type)
+              }
+
+              typeColor = uniqTypes.length > 3 ? chalk.bgRed : uniqTypes.length > 1 ? chalk.bgYellow : chalk.white
+            } else {
+              uniqTypes.push(`too complex...`)
             }
 
             if (KEYS_NOT_NOT_HIGHLIGHT_TYPE_IN_UNSCHEMAED_KEYS.includes(tagName)) typeColor = chalk.grey.italic
 
             log.add(chalk.gray.italic(section))
             log.add(chalk.grey(`@ ${pipelineDebug}`))
-            log.add(chalk.gray(`  [${typeColor(types.join(`, `))}]`))
+            log.add(chalk.gray(`  [${typeColor(uniqTypes.join(`, `))}]`))
             log.warn()
           }
         }

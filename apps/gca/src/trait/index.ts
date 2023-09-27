@@ -5,12 +5,15 @@ import { TraitParser } from "./parser"
 
 import churchill from "../logger"
 import TraitTag, { TRAIT_TAG_NAMES, TraitTagName } from "./tag/tag"
-import { cloneDeep, get, isNil, last, uniq } from "lodash"
+import { cloneDeep, get, isNil, last, range, uniq } from "lodash"
 import { NullableLogBuilder } from "@december/churchill"
 import chalk from "chalk"
 import { TraitError, TraitErrorManager, getHighestErrorPriority } from "./error"
 import { SuperchargedTraitData, TRAIT_SCHEMAS, TraitDefinition } from "./sections"
 import { TraitSection } from "./sections/types"
+import { isOnlybornAnd } from "./parser/node/utils"
+import { SYNTAX_COMPONENTS } from "./parser/syntax"
+import { TraitParserNode } from "./parser/node"
 
 export const logger = churchill.child({ name: `trait` })
 
@@ -133,9 +136,88 @@ export default class Trait<TDefinition extends TraitDefinition = TraitDefinition
     const separator = root.children[0]
     const lists = separator.children
 
+    // detect piping
+    const pipedIndexes = [] as number[]
+    for (let i = 0; i < lists.length; i++) {
+      const list = lists[i]
+
+      // ERROR: Node is not a tag
+      if (!TraitTag.isNodeATag(list, this)) debugger
+
+      // check if value's first child is onlyborn and pipe
+      const valueNode = TraitTag.getValueNode(list)
+      if (isOnlybornAnd(valueNode.children, [`pipe`])) {
+        // value IS piped
+        pipedIndexes.push(i)
+      } else {
+        // value does not appear to be piped
+
+        // there can be pipes not at first level
+        //    gives(...) is an example of this, its value can be quite complex of a statement
+
+        // check if there is a pipe in the first child level, but it is not onlyborn
+        if (valueNode.children.length > 1 && valueNode.children.some(node => node.syntax.name === `pipe`)) {
+          // ERROR: Untested
+          debugger
+        }
+      }
+    }
+
+    // determine if piping is correct (same number of options for EVERY piped tag)
+    let PIPE_VARIANTS = 1
+    if (pipedIndexes.length > 0) {
+      const indexOfOptions = {} as Record<number, number[]>
+
+      for (let i = 0; i < pipedIndexes.length; i++) {
+        const list = lists[pipedIndexes[i]]
+        const valueNode = TraitTag.getValueNode(list)
+        const pipe = valueNode.children[0]
+
+        const numberOfOptions = pipe.middles.length
+        if (indexOfOptions[numberOfOptions] === undefined) indexOfOptions[numberOfOptions] = []
+        indexOfOptions[numberOfOptions].push(pipedIndexes[i])
+      }
+
+      const uniqNumberOfOptions = uniq(Object.keys(indexOfOptions).map(key => parseInt(key)))
+      if (uniqNumberOfOptions.length === 1) {
+        // PIPE IS CORRECT
+        PIPE_VARIANTS = uniqNumberOfOptions[0]
+      } else {
+        // this._parser.root.printCompact({ lineSizeWithoutLevenPadding: 240 })
+
+        for (const qtd of uniqNumberOfOptions) {
+          // choose smaller node (easier to debug)
+          const pool = indexOfOptions[qtd]
+
+          const nodePool = pool.map(index => ({ node: lists[index], substring: lists[index].substring.trim() })).sort((a, b) => a.substring.length - b.substring.length)
+
+          const node = nodePool[0].node
+
+          console.error(
+            chalk.bgGray.white(
+              `${` `.repeat(50)}${node.backgroundColor(` ${node.context} (${chalk.bold(`${node.children[0].substring.trim()}`)}) `)} has ${chalk.bold(qtd)} pipes (${
+                pool.length === 1 ? chalk.bgRed(`ONLY ONE`) : `one of ${chalk.bold(pool.length)}`
+              })${` `.repeat(50)}`,
+            ),
+          )
+
+          const pipe = node.children[1]
+          pipe.printRelevant({ sections: [`context`], lineSizeWithoutLevenPadding: 240, levels: range(pipe.level, pipe.level + 3), calculateLevels: [pipe.level] })
+          console.log(` `)
+        }
+
+        console.error(chalk.bgRed(`${` `.repeat(50)}Trait ${chalk.bold(this._row.fst)} at .fst${` `.repeat(50)}`))
+        this._parser.root.printCompact({ sections: [`text`], lineSizeWithoutLevenPadding: 240 })
+        // piping is not uniform across all piped tags, WHY?
+        debugger
+      }
+    }
+
     const tags = {} as Record<TraitTagName, TraitTag>
     for (let i = 0; i < lists.length; i++) {
       const list = lists[i]
+
+      const isPiped = pipedIndexes.includes(i) // informs that value for tag IS piped (and conforming to pipe format across all other piped tags)
 
       const tag = new TraitTag(this, list)
       const result = tag.parse()

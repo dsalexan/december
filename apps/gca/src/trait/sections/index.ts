@@ -3,18 +3,18 @@ import { z } from "zod"
 import { BaseTrait, BaseTraitSchema } from "./base"
 import { AbstractTrait, TraitSection } from "./types"
 import { TraitModifier, TraitModifierSchema } from "./modifier"
-import { TraitEquipmentSchema } from "./equipment"
-import { TraitAdvantageSchema } from "./advantage"
-import { TraitSkillSchema } from "./skill"
-import { TraitPerkSchema } from "./perk"
-import { TraitSpellSchema } from "./spell"
-import { TraitTemplateSchema } from "./template"
-import { TraitAttributeSchema } from "./attribute"
-import { TraitQuirkSchema } from "./quirk"
-import { TraitDisadvantageSchema } from "./disadvantage"
-import { TraitFeatureSchema } from "./feature"
-import { TraitCultureSchema } from "./culture"
-import { TraitLanguageSchema } from "./language"
+import { TraitEquipment, TraitEquipmentSchema } from "./equipment"
+import { TraitAdvantage, TraitAdvantageSchema } from "./advantage"
+import { TraitSkill, TraitSkillSchema } from "./skill"
+import { TraitPerk, TraitPerkSchema } from "./perk"
+import { TraitSpell, TraitSpellSchema } from "./spell"
+import { TraitTemplate, TraitTemplateSchema } from "./template"
+import { TraitAttribute, TraitAttributeSchema } from "./attribute"
+import { TraitQuirk, TraitQuirkSchema } from "./quirk"
+import { TraitDisadvantage, TraitDisadvantageSchema } from "./disadvantage"
+import { TraitFeature, TraitFeatureSchema } from "./feature"
+import { TraitCulture, TraitCultureSchema } from "./culture"
+import { TraitLanguage, TraitLanguageSchema } from "./language"
 
 export const TRAIT_SCHEMAS = {
   attributes: TraitAttributeSchema,
@@ -33,7 +33,20 @@ export const TRAIT_SCHEMAS = {
   modifiers: TraitModifierSchema,
 } as const
 
-export type TraitDefinition = TraitModifier
+export type TraitDefinition =
+  | TraitAttribute
+  | TraitLanguage
+  | TraitCulture
+  | TraitAdvantage
+  | TraitPerk
+  | TraitDisadvantage
+  | TraitQuirk
+  | TraitFeature
+  | TraitSkill
+  | TraitSpell
+  | TraitEquipment
+  | TraitTemplate
+  | TraitModifier
 
 export type SuperchargedTraitData<TDefinition extends TraitDefinition> = TDefinition[`Data`] & {
   fullname: string

@@ -228,6 +228,17 @@ export class TraitParserNode<TSyntax extends SyntaxComponent = SyntaxComponent, 
     return undefined
   }
 
+  find(syntax: SyntaxComponent): TraitParserNode | undefined {
+    if (this.syntax.name === syntax.name) return this
+
+    for (const child of this.children) {
+      const find = child.find(syntax)
+      if (find) return find
+    }
+
+    return undefined
+  }
+
   levelByIndex(index: number): number {
     // return node level by index of character
     if (index < this.start) return -1
@@ -644,12 +655,14 @@ export class TraitParserNode<TSyntax extends SyntaxComponent = SyntaxComponent, 
   // #region PRINT
 
   printCompact(options: Partial<TraitParserNodePrintOptions> = {}) {
-    this.print({ ...options, levels: [2], calculateLevels: [2, 3], sections: [`nodes`], lineSizeWithoutLevenPadding: 220, onlyRelevantSource: true })
+    const hasNodes = options.sections === undefined || options.sections?.includes(`nodes`)
+
+    if (hasNodes) this.print({ ...options, levels: [2], calculateLevels: [2, 3], sections: [`nodes`], lineSizeWithoutLevenPadding: 220, onlyRelevantSource: true })
     this.print({
       ...options,
       levels: [3],
       calculateLevels: [2, 3],
-      sections: [`text`, `nodes`],
+      sections: hasNodes ? [`text`, `nodes`] : [`text`],
       lineSizeWithoutLevenPadding: 220,
       onlyRelevantSource: true,
       boldString: true,
@@ -657,7 +670,7 @@ export class TraitParserNode<TSyntax extends SyntaxComponent = SyntaxComponent, 
       useParentColor: true,
       dimNodes: true,
     })
-    this.print({ ...options, levels: [4], calculateLevels: [2, 3], sections: [`nodes`], lineSizeWithoutLevenPadding: 220, onlyRelevantSource: true, dimNodes: true })
+    if (hasNodes) this.print({ ...options, levels: [4], calculateLevels: [2, 3], sections: [`nodes`], lineSizeWithoutLevenPadding: 220, onlyRelevantSource: true, dimNodes: true })
   }
 
   printRelevant(options: Partial<TraitParserNodePrintOptions> = {}) {

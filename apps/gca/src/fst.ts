@@ -12,8 +12,10 @@ import { isNilOrEmpty, push } from "@december/utils"
 import { NamedIndexMap, makeNamedIndexMap, pushToNamedIndexMap } from "./utils"
 import Trait from "./trait"
 import { TraitErrorManager } from "./trait/error"
-import TraitTag, { TRAIT_TAG_NAMES } from "./trait/tag/tag"
+import TraitTag, { TRAIT_TAG_NAMES, TraitTagName } from "./trait/tag/tag"
 import { FastIndex } from "./fstndx"
+import { getType, guessType } from "@december/utils/src/typing"
+import { PrimitiveVariableTypes } from "@december/utils/src/typing/types"
 
 export const logger = churchill.child({ name: `fst` })
 
@@ -74,9 +76,9 @@ export class Fast {
       const line = this.content[i]
       if (line === ``) continue
 
-      // const GOOD_TESTING_CASES = [11893, 3375, 1588, 802, 759, 575, 563, 541, 498, 452, 308, 241, 228, 205, 166, 147, 135, 122, 112, 111, 105, 102, 92, 68, 50, 36, 47, 7, 2, 0]
-      // const EXPANDED_TESTING_CASES = uniq(GOOD_TESTING_CASES.map(_index => range(-2, 2 + 1).map(mod => _index + mod)).flat())
-      // if (!EXPANDED_TESTING_CASES.includes(i)) continue
+      let GOOD_TESTING_CASES = [11893, 3375, 1588, 802, 759, 575, 563, 541, 498, 452, 308, 241, 228, 205, 166, 147, 135, 122, 112, 111, 105, 102, 92, 68, 50, 36, 47, 7, 2, 0]
+      GOOD_TESTING_CASES = uniq(GOOD_TESTING_CASES.map(_index => range(-2, 2 + 1).map(mod => _index + mod)).flat())
+      if (!GOOD_TESTING_CASES.includes(i)) continue
       // if (![7, 2, 0].includes(i)) continue
       // if (![147].includes(i)) continue
       // if (![459].includes(i)) continue
@@ -209,9 +211,9 @@ export class Fast {
     if (errorManager.getHighestErrorPriority() >= 0) {
       const errors = errorManager.get(0)
 
-      traitLogger.add(` `).warn()
-      traitLogger.add(chalk.white.bold(`Low Priority Errors`)).warn()
-      errorManager.printErrors(traitLogger.tab(), errors, {
+      log.add(` `).warn()
+      log.add(chalk.white.bold(`Low Priority Errors`)).warn()
+      errorManager.printErrors(log.tab(), errors, {
         hide: [`unsuccessfulTagValueParsing`],
         tooComplexTypeInUnschemaedKeys: [
           `x`,
@@ -258,12 +260,100 @@ export class Fast {
           `lc`,
           `conditional`,
           `acc`,
+          `description`,
         ],
-        dontHighlightTypeInUnschamedKeys: [`cat`, `description`],
+        dontHighlightTypeInUnschamedKeys: [`basecost`, `techlvl`, `mods`, `isparent`, `displaycost`, `page`, `noresync`],
       })
-      traitLogger.tab(-1)
     }
 
     return traits
+  }
+
+  analysis(traits: Trait[], tags: TraitTagName[]) {
+    const log = logger.builder()
+    log.tab()
+
+    log.add(` `).warn()
+    log.add(chalk.bgWhite.bold(`.fst Analysis`)).info().tab()
+
+    const bySections = {} as Record<TraitSection, Record<string, Trait[]>>
+    for (const trait of traits) {
+      if (bySections[trait.section] === undefined) bySections[trait.section] = {}
+
+      const tags = Object.values(trait._tags)
+      for (const tag of tags) {
+        if (bySections[trait.section][tag.name] === undefined) bySections[trait.section][tag.name] = []
+        bySections[trait.section][tag.name].push(trait)
+      }
+    }
+
+    for (const tagName of tags) {
+      const tagSections = Object.keys(bySections) as TraitSection[]
+      if (tagSections.length === 0 || sum(tagSections.map(section => bySections[section][tagName]?.length ?? 0)) === 0) continue
+
+      const prefix = `${tagName}`
+      log.add(chalk.bold(prefix)).info().tab()
+
+      const sections = tagSections as TraitSection[]
+      for (const section of sections) {
+        const tagTraits = bySections[section][tagName] ?? []
+        if (tagTraits.length === 0) continue
+
+        log
+          .add(`${chalk.italic.gray(section)}`)
+          .info()
+          .tab()
+
+        // eslint-disable-next-line no-control-regex
+        const ANSI = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g
+
+        const uniqTypes = [] as any
+        const uniqTypesClean = [] as any
+
+        for (const trait of traits) {
+          const type = trait._tags[tagName]?.valueNode.children[0].guessType()
+          const cleanType = type?.replace(ANSI, ``)
+          if (uniqTypesClean.includes(cleanType!)) continue
+          if (isNilOrEmpty(cleanType)) continue
+
+          uniqTypesClean.push(cleanType)
+          uniqTypes.push(type)
+        }
+
+        log.add(`${uniqTypes.join(`, `)}`).info()
+        // .add(` `.repeat(prefix.length))
+
+        const repeatingFlags = [] as string[]
+
+        for (const trait of tagTraits) {
+          const tag = trait._tags[tagName]
+
+          const value = tag?._value.stringified
+          const type = guessType(value)
+          const isPrimitiveNonString = PrimitiveVariableTypes.includes(type!) && type !== `string`
+          const uniqFlag = isPrimitiveNonString ? type : value
+
+          const doIgnore = uniqFlag !== undefined && repeatingFlags.includes(uniqFlag)
+          if (doIgnore) continue
+
+          log
+            // .add(` `.repeat(prefix.length + 1 + section.length))
+            .add(chalk.gray(`[${chalk.bold(trait._id)}]${` `.repeat(traits.length.toString().length - trait._id.toString().length)}`))
+            .add(tag ? tag._value.stringified : `<unknown tag>`)
+
+          if (isPrimitiveNonString) log.add(chalk.gray.italic(` (${type}) `))
+
+          log.info()
+
+          if (uniqFlag !== undefined) repeatingFlags.push(uniqFlag)
+        }
+
+        log.tab(-1)
+      }
+
+      log.tab(-1)
+    }
+
+    log.tab(-1)
   }
 }

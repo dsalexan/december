@@ -5,6 +5,7 @@ import logger from "./logger"
 
 import * as FastIndex from "./fstndx"
 import * as Fast from "./fst"
+import { TraitTagName } from "./trait/tag/tag"
 
 const OUTPUT_DIRECTORY = `D:/Code/foundry/december/gurps-mobile/static/js`
 
@@ -34,7 +35,8 @@ function extract() {
   const fstLogger = Fast.logger.builder().startTimer(`extract`)
   fstLogger.add(`Extracting fast...`).verbose()
 
-  fst.extract(`${LIBRARY_NAME}.gds.fst`, LIBRARY_DIRECTORY)
+  const traits = fst.extract(`${LIBRARY_NAME}.gds.fst`, LIBRARY_DIRECTORY)
+  fst.analysis(traits, [`basecost`, `basedon`] as any as TraitTagName[])
 
   fstLogger.add(`Fast extracted.`).verbose({ profiler: `extract` })
 }
