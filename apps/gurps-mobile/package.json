@@ -1,0 +1,49 @@
+{
+  "name": "@december/gurps-mobile",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "icons": "node scripts/icons.mjs",
+    "start": "node server/start.js",
+    "build": "node server/build.js",
+    "foundry": "gulp --gulpfile ./gulpfile.mjs link",
+    "sheet": "node ./scripts/sheet"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@league-of-foundry-developers/foundry-vtt-types": "^9.280.0",
+    "@typhonjs-fvtt/eslint-config-foundry.js": "^0.8.0",
+    "clean-webpack-plugin": "^4.0.0",
+    "copy-webpack-plugin": "^11.0.0",
+    "crypto": "^1.0.1",
+    "eslint-config-december": "workspace:*",
+    "eslint-webpack-plugin": "^4.0.1",
+    "fs-extra": "^11.1.1",
+    "glob": "^10.3.10",
+    "gulp": "^4.0.2",
+    "gulp-replace": "^1.1.4",
+    "gulp-run": "^1.7.1",
+    "mini-css-extract-plugin": "^2.7.6",
+    "node-sass-glob-importer": "^5.3.3",
+    "replace-in-file-webpack-plugin": "^1.0.6",
+    "resolve": "^1.22.6",
+    "sass-alias": "^2.0.1",
+    "speed-measure-webpack-plugin": "^1.5.0",
+    "tsconfig": "workspace:*",
+    "tsconfig-paths-webpack-plugin": "^4.1.0",
+    "webpack": "^5.88.2",
+    "webpack-visualizer-plugin2": "^1.0.0",
+    "yargs": "^17.7.2"
+  },
+  "dependencies": {
+    "@december/churchill": "workspace:*",
+    "@december/utils": "workspace:^",
+    "mathjs": "^11.11.1",
+    "mout": "^1.2.4",
+    "zod": "^3.22.2",
+    "zod-to-ts": "^1.2.0"
+  }
+}
