@@ -1,4 +1,4 @@
-import { isArray, isBoolean, isFunction, isNumber, isObjectLike, isString } from "lodash"
+import { isArray, isBoolean, isFunction, isNumber, isObjectLike, isString, isSymbol } from "lodash"
 import { VariableType } from "./types"
 
 // export type VariableType = `string` | `number` | `bigint` | `boolean` | `symbol` | `undefined` | `object` | `function`
@@ -16,12 +16,15 @@ export function isType(value: unknown, type: VariableType) {
 }
 
 export function getType(value: unknown): VariableType | undefined {
-  if (isString(value)) return `string`
+  if (isSymbol(value)) return `symbol`
+  else if (isString(value)) return `string`
   else if (isNumber(value)) return `number`
   else if (isBoolean(value)) return `boolean`
   else if (isFunction(value)) return `function`
   else if (isArray(value)) return `array`
   else if (isObjectLike(value)) return `object`
+  else if (value === undefined) return `undefined`
+  else if (value === null) return `null`
 
   // ERROR: Unimplemented
   return undefined

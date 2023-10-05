@@ -1,3 +1,4 @@
+/* eslint-disable no-debugger */
 import path from "path"
 import fs from "fs"
 
@@ -11,11 +12,13 @@ import IndexedCategory from "./category/indexed"
 import { isNilOrEmpty, push } from "@december/utils"
 import { NamedIndexMap, makeNamedIndexMap, pushToNamedIndexMap } from "./utils"
 import Trait from "./trait"
-import { TraitErrorManager } from "./trait/error"
-import TraitTag, { TRAIT_TAG_NAMES, TraitTagName } from "./trait/tag/tag"
+import TraitTag from "./trait/tag"
 import { FastIndex } from "./fstndx"
 import { getType, guessType } from "@december/utils/src/typing"
 import { PrimitiveVariableTypes } from "@december/utils/src/typing/types"
+import { TAG_NAMES, TagName } from "./trait/tag/tag"
+import { TraitIssueManager } from "./trait/issues"
+import { guessNodeType } from "./trait/parser/node/utils"
 
 export const logger = churchill.child({ name: `fst` })
 
@@ -70,19 +73,30 @@ export class Fast {
 
     const traitLogger = churchill.child({ name: `trait`, level: `data` }).builder().tab()
 
-    const errorManager = new TraitErrorManager(null)
+    const issues = new TraitIssueManager()
 
     for (let i = 0; i < this.content.length; i++) {
       const line = this.content[i]
       if (line === ``) continue
 
-      let GOOD_TESTING_CASES = [11893, 3375, 1588, 802, 759, 575, 563, 541, 498, 452, 308, 241, 228, 205, 166, 147, 135, 122, 112, 111, 105, 102, 92, 68, 50, 36, 47, 7, 2, 0]
-      GOOD_TESTING_CASES = uniq(GOOD_TESTING_CASES.map(_index => range(-2, 2 + 1).map(mod => _index + mod)).flat())
-      if (!GOOD_TESTING_CASES.includes(i)) continue
+      if (i % 500 === 0 && i > 0)
+        log
+          .add(`  `)
+          .add(chalk.grey(`[${i}]`.padEnd(this.content.length.toString().length + 2, ` `)))
+          .verbose({ duration: true })
+
+      // let GOOD_TESTING_CASES = [
+      //   11893, 3375, 1588, 1493, 802, 759, 575, 563, 541, 498, 452, 308, 241, 235, 228, 205, 166, 147, 135, 122, 112, 111, 105, 102, 92, 68, 50, 36, 47, 10, 7, 2, 0,
+      // ]
+      // GOOD_TESTING_CASES = uniq(GOOD_TESTING_CASES.map(_index => range(-2, 2 + 1).map(mod => _index + mod)).flat())
+      // if (!GOOD_TESTING_CASES.includes(i)) continue
       // if (![7, 2, 0].includes(i)) continue
       // if (![147].includes(i)) continue
       // if (![459].includes(i)) continue
       // if (![541].includes(i)) continue
+      // if (![235, 241].includes(i)) continue
+      // if (![10].includes(i)) continue
+      // if (![1493].includes(i)) continue
 
       const typing = this.fstndx.traits.byID[i]
 
@@ -104,34 +118,81 @@ export class Fast {
 
       traitLogger.tab()
 
-      trait.parse(traitLogger)
+      trait.parse(issues)
+
+      trait.compile(issues)
+      trait.mount(issues)
 
       // PRINT A LOT OF SHIT TO DEBUG
-      const PRINT_A_LOT_OF_SHIT_TO_DEBUG = false && [241].includes(i)
+      const PRINT_A_LOT_OF_SHIT_TO_DEBUG = false && [235].includes(i)
       if (PRINT_A_LOT_OF_SHIT_TO_DEBUG) {
         const root = trait._parser.root
-        // root.printCompact()
-        root.print({ calculateLevels: [2, 3], lineSizeWithoutLevenPadding: 200, dontRepeatDigitsInHeader: true })
+        root.printer.compact({ lineSizeWithoutLevenPadding: 240 })
+        // root.printer.print({ sections: [`nodes`, `text`], calculateLevels: [2, 3], lineSizeWithoutLevenPadding: 200, dontRepeatDigitsInHeader: true })
 
-        const context = `ρ3.ab`
+        const context = `ρ3.n`
         const node = trait._parser.get(context)
         if (!node) traitLogger.add(chalk.bgRed(` Could not find node "${chalk.bold(context)}" at trait ${chalk.bold(i)} `)).error()
-        else node.printRelevant({ sections: [`context`], lineSizeWithoutLevenPadding: 240 })
+        else node.printer.relevant({ sections: [`context`], lineSizeWithoutLevenPadding: 240 })
       }
 
-      trait.compile(traitLogger)
-      trait.mount(traitLogger)
-
       // REFERENCES TO SPEED-UP ERROR RESOLUTION
-      TRAIT_TAG_NAMES // TraitTag.TRAIT_TAG_NAMES
+      TAG_NAMES // TraitTag.TRAIT_TAG_NAMES
 
       /**
        * HOW TO RESOLVE ERRORS
        *
-       * First it is important to understand the order. The printing will show:
-       *    unschemaedKeys > missingTagName > unsuccessfulTagValueParsing
+       * [Missing Tag Name]
+       *  Will show all tags that are not properly registered within src/trait/tag/tag.ts > TAG_NAMES.
+       *  To "register" a tag is to condense is description from GCA documentation (https://www.misersoft.com/gca/downloads/GCA%20Data%20File%20Reference%20Guide.pdf) into a TagDefinition format
+       *  There is a spreadsheet for this (./apps/data/gca/tag_definitions.xlsx)
        *
-       *  [Unschemaed Keys]
+       *  Resolution:
+       *    - Open GCA Data File Reference Guide.pdf
+       *    - Find the tag
+       *    - Read its information, condense relevant shit into a TypeDefinition format
+       *    - Add to TAG_NAMES in src/trait/tag/tag.ts
+       *    - Now the tag name is not missing anymore. In case its type is too complex to deal atm, just set "type: unknown".
+       *      - This will trigger another issue down the line, but thats ok
+       *
+       *
+       * [Incomplete Tag Definition]
+       *  When a tag definition exisits, but its information is somewhat incomplete.
+       *  Currently that means its type is "unknown". So you will have to make it known.
+       *
+       *  Resolution:
+       *    - Decide on a format for the tag. Name it something.
+       *      - It is important to take in consideration all possible data formats across all traits. A suitable summary is shown in issues.
+       *      - It is recommended a dedicated run with the tag name in analysis to see ALL values across all traits.
+       *    - Update the name in all places (src/trait/tag/tag.ts and spreadsheet).
+       *    - This will trigger the missing implementation issue down the line.
+       *
+       *
+       * [Missing Tag Type Implementation]
+       * When a definition has a type, but its implementation is missing from src/trait/tag/value.ts > _definition.
+       *
+       * Resolution:
+       *    - Just add the implementation
+       *    - Use issues summary/analysis to determine the code.
+       *    - Don't forget to account for multiple nodes (if applicable)
+       *
+       *
+       * [Tag Not Parsed]
+       *  Will show, trait by trait, all the tags and its values that were not parsed.
+       *  The reason why a value was not parsed can vary a lot, but will probably be informed in another issue
+       *  Here we have a "summary" of all unparsed tags across all traits, so it is more usefull at the trail end of the project.
+       *
+       *  Resolution:
+       *    - Find out why the value was not parsed (look in other issues)
+       *    - Solve that issue
+       *
+       *
+       * [Mismatched Number of Nodes in Tag]
+       *  When a tag is mode enabled, but its number of pipes doest not match the number of pipes in the "mode()" tag (mode tag informs mode names)
+       *  ...
+       *
+       *
+       * [Missing Key in Schema]
        *  Will show all tags that are not tracked by the trait section's schema.
        *  Will also show a breakdown of all types of values that are present in all lines for that tag/section.
        *    This breakdown is useful to understand which tag to implement next (and how to implement it).
@@ -144,59 +205,17 @@ export class Fast {
        *   - Implement the necessary tags (name and type) in zod schema format
        *   - Update the general definition of trait (TraitDefinition) in src/trait/sections/index.ts
        *
-       *  [Missing Tag Name]
-       *  Will show all tags that are not properly registered within the trait pipeline.
-       *  To "register" a tag is simply to add its name to TRAIT_TAG_NAMES.
        *
-       *  Resolution:
-       *    - Go to src/trait/sections/tag.ts (TraitTag)
-       *    - Add tag name to "TRAIT_TAG_NAMES"
-       *    - This will probably stop the next execution at TraitTag.parseValue(...), at "ERROR: Unimplemented tag name"
-       *      - That section of the code properly parses the value of the tag, and its complexity can vary A LOT.
-       *      - That's why it is important to check the Unschemaed Keys first, to get a glimpse of how the implementation will go down.
-       *
-       *  [Unsuccessful Tag Value Parsing]
-       *  Will show, trait by trait, all the tags that were not parsed.
-       *  Usually that means that the tag name is not yet registered within the code.
-       *    If a tag is registered but not parsed, the code execution would stop at the debugger in TraitTag.parseValue(...) "ERROR: Unimplemented tag name"
-       *
-       *  Resolution:
-       *    - Register the tag name (see [Missing Tag Name])
-       *    - Upon register the code execution will halt at the appropriate breakpoint
-       *    - Implement the tag value parsing (complexity may vary A LOT)
+       * [Type Differs from Schema]
+       *  When a value inside traits mounted data does not match the schema type (but is defined/parsed)
+       *  ...
        */
 
-      if (trait.getHighestErrorPriority() >= 1) {
+      if (issues.getHighestPriorityByTrait(trait) >= 1) {
         debugger
       }
 
-      trait.validate(traitLogger)
-      errorManager.copy(trait._errors)
-
-      // const entry = new GDF(shiftLine)
-      // entry._index = entries.length
-      // entry._row = i
-
-      // const _data = entry._data
-      // const data = entry.data
-
-      // // console.log(` `)
-      // // TypedValue.print(_data)
-      // // console.log(data)
-      // // console.log(` \n \n \n \n \n \n \n`)
-      // // debugger
-
-      // // ERROR: every entry should have a name
-      // try {
-      //   if (entry.data.name.match(_placeholder)) continue
-      // } catch (ex) {
-      //   console.log(ex)
-      //   console.log(``)
-      //   console.log(entry)
-      //   console.log(``)
-      //   console.log(`book???`)
-      //   debugger
-      // }
+      trait.validate(issues)
 
       traits.push(trait)
 
@@ -208,68 +227,74 @@ export class Fast {
       .add(`Extracted ${chalk.bold(traits.length)} traits`)
       .verbose({ duration: true })
 
-    if (errorManager.getHighestErrorPriority() >= 0) {
-      const errors = errorManager.get(0)
-
+    if (issues.getHighestPriority() >= 0) {
       log.add(` `).warn()
-      log.add(chalk.white.bold(`Low Priority Errors`)).warn()
-      errorManager.printErrors(log.tab(), errors, {
-        hide: [`unsuccessfulTagValueParsing`],
-        tooComplexTypeInUnschemaedKeys: [
-          `x`,
-          `default`,
-          `gives`,
-          `damage`,
-          `initmods`,
-          `creates`,
-          `notes`,
-          `damtype`,
-          `needs`,
-          `adds`,
-          `itemnotes`,
-          `skillused`,
-          `uses_settings`,
-          `uses`,
-          `usernotes`,
-          `units`,
-          `taboo`,
-          `subsfor`,
-          `shots`,
-          `shortcat`,
-          `select9`,
-          `select8`,
-          `select7`,
-          `select6`,
-          `select5`,
-          `select4`,
-          `select3`,
-          `select2`,
-          `select1`,
-          `select0`,
-          `replacetags`,
-          `rof`,
-          `reach`,
-          `rcl`,
-          `rangemax`,
-          `rangehalfdam`,
-          `parry`,
-          `mods`,
-          `mode`,
-          `minst`,
-          `levelnames`,
-          `lc`,
-          `conditional`,
-          `acc`,
-          `description`,
-        ],
-        dontHighlightTypeInUnschamedKeys: [`basecost`, `techlvl`, `mods`, `isparent`, `displaycost`, `page`, `noresync`],
+      log.add(chalk.white.bold(`Low Priority Issues`)).warn()
+      issues.print(issues.get(0), {
+        log: log.tab(),
+        //
+        hide: [`tag_not_parsed`, `incomplete_tag_definition`], //, `unapproved_tag_type_values`, 'missing_key_in_schema'
+        sections: [`skills`],
+        tags: {
+          abbreviateType: [
+            `x`,
+            `default`,
+            `gives`,
+            `damage`,
+            `initmods`,
+            `creates`,
+            `notes`,
+            `damtype`,
+            `needs`,
+            `adds`,
+            `itemnotes`,
+            `skillused`,
+            `uses_settings`,
+            `uses`,
+            `usernotes`,
+            `units`,
+            `taboo`,
+            `subsfor`,
+            `shots`,
+            `shortcat`,
+            `selectX`,
+            `replacetags`,
+            `rof`,
+            `reach`,
+            `rcl`,
+            `rangemax`,
+            `rangehalfdam`,
+            `parry`,
+            `mods`,
+            `mode`,
+            `minst`,
+            `levelnames`,
+            `lc`,
+            `conditional`,
+            `acc`,
+            `description`,
+            `basevalue`,
+            `parentof`,
+          ],
+          highlight: [
+            //
+            // `parentof`,
+            // `basecost`,
+            // `techlvl`,
+            // `mods`,
+            // `isparent`,
+            // `displaycost`,
+            // `page`,
+            // `noresync`,
+          ],
+        },
       })
     }
 
     return traits
   }
 
-  analysis(traits: Trait[], tags: TraitTagName[]) {
+  analysis(traits: Trait[], tags: string[]) {
     const log = logger.builder()
     log.tab()
 
@@ -280,14 +305,14 @@ export class Fast {
     for (const trait of traits) {
       if (bySections[trait.section] === undefined) bySections[trait.section] = {}
 
-      const tags = Object.values(trait._tags)
+      const tags = Object.values(trait._tags) as TraitTag[]
       for (const tag of tags) {
         if (bySections[trait.section][tag.name] === undefined) bySections[trait.section][tag.name] = []
         bySections[trait.section][tag.name].push(trait)
       }
     }
 
-    for (const tagName of tags) {
+    for (const tagName of tags as TagName[]) {
       const tagSections = Object.keys(bySections) as TraitSection[]
       if (tagSections.length === 0 || sum(tagSections.map(section => bySections[section][tagName]?.length ?? 0)) === 0) continue
 
@@ -311,7 +336,12 @@ export class Fast {
         const uniqTypesClean = [] as any
 
         for (const trait of traits) {
-          const type = trait._tags[tagName]?.valueNode.children[0].guessType()
+          const tag = trait._tags[tagName]!
+          if (tag === undefined) continue // trait doesnt have this tag
+
+          const valueNodeChildren = tag.valueNode.children
+
+          const type = valueNodeChildren[0] === undefined ? chalk.gray.italic.bgBlack(`nil`) : guessNodeType(valueNodeChildren[0])
           const cleanType = type?.replace(ANSI, ``)
           if (uniqTypesClean.includes(cleanType!)) continue
           if (isNilOrEmpty(cleanType)) continue
@@ -328,7 +358,7 @@ export class Fast {
         for (const trait of tagTraits) {
           const tag = trait._tags[tagName]
 
-          const value = tag?._value.stringified
+          const value = tag?._value.string
           const type = guessType(value)
           const isPrimitiveNonString = PrimitiveVariableTypes.includes(type!) && type !== `string`
           const uniqFlag = isPrimitiveNonString ? type : value
@@ -338,8 +368,8 @@ export class Fast {
 
           log
             // .add(` `.repeat(prefix.length + 1 + section.length))
-            .add(chalk.gray(`[${chalk.bold(trait._id)}]${` `.repeat(traits.length.toString().length - trait._id.toString().length)}`))
-            .add(tag ? tag._value.stringified : `<unknown tag>`)
+            .add(chalk.gray(`[${chalk.bold(trait._id)}]${` `.repeat(Math.max(1, traits.length.toString().length - trait._id.toString().length))}`))
+            .add(tag ? chalk.bgBlack(tag._value.string) : `<unknown tag>`)
 
           if (isPrimitiveNonString) log.add(chalk.gray.italic(` (${type}) `))
 

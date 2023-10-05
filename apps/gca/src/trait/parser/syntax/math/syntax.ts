@@ -1,6 +1,6 @@
 import { ArrayNode } from "mathjs"
 import { makeSyntaticComponent } from "../component"
-import { MathOperatorSyntaxComponent, MathSyntaxComponent, MathSyntaxNames, SyntaxComponent } from "../types"
+import { MathSyntaxNames, SyntaxComponent } from "../types"
 
 export type MathJSNodeTypes = `OperatorNode` | `FunctionNode` | `SymbolNode` | `ConstantNode` | `ParenthesisNode` | `ArrayNode`
 
@@ -41,31 +41,34 @@ export const MathJSInverseOperatorNodeMap = Object.fromEntries(Object.entries(Ma
 
 export type MathOperators = keyof typeof MathJSOperatorNodeMap
 
-export function makeMathComponent<TComponent extends SyntaxComponent = SyntaxComponent>(name: MathSyntaxNames, prefix: string, options?: Partial<{}>) {
-  const component = makeSyntaticComponent<TComponent>(`math`, name, prefix, [])
-
-  // if (name === `math_operator`) {
-  //   const operator = component as MathOperatorSyntaxComponent
-
-  //   // ERROR: Unimplemented for empty operator
-  //   if (options?.operator === undefined) debugger
-  //   else {
-  //     operator.operator = options?.operator
-  //   }
-  // }
-
-  return component
-}
-
 export const MATH_SYNTAX_COMPONENTS = {
-  math: makeMathComponent<MathSyntaxComponent>(`math`, `π`),
+  math_expression: makeSyntaticComponent(`math`, `math_expression`, `e`, []),
   //
-  math_operator: makeMathComponent<MathOperatorSyntaxComponent>(`math_operator`, `∮`),
-  math_constant: makeMathComponent<MathOperatorSyntaxComponent>(`math_constant`, `∀`),
-  math_symbol: makeMathComponent<MathOperatorSyntaxComponent>(`math_symbol`, `∑`),
-  math_parenthesis: makeMathComponent<MathOperatorSyntaxComponent>(`math_parenthesis`, `ρ`),
-  math_array: makeMathComponent<MathOperatorSyntaxComponent>(`math_array`, `β`),
+  math_operator: makeSyntaticComponent(`separator`, `math_operator`, `o`, [`+`, `-`, `/`, `*`, `x`, `^`, `=`], {
+    parents: [`imaginary`, `parenthesis`, `math_expression`, `list`],
+    prio: {
+      "+": 1.2,
+      "-": 1.2,
+      "/": 1.5,
+      "*": 1.5,
+      x: 1.5,
+      "^": 1.7,
+      "=": 1.01,
+    },
+  }),
+  math_function: makeSyntaticComponent(`aggregator`, `math_function`, `@`, [], { prio: 15 }),
+  math_number: makeSyntaticComponent(`math`, `math_number`, `n`, []),
+  math_variable: makeSyntaticComponent(`math`, `math_variable`, `v`, []),
+  // math_operator: makeMathComponent<MathOperatorSyntaxComponent>(`math_operator`, `∮`),
+  // math_constant: makeMathComponent<MathOperatorSyntaxComponent>(`math_constant`, `∀`),
+  // math_symbol: makeMathComponent<MathOperatorSyntaxComponent>(`math_symbol`, `∑`),
+  // math_parenthesis: makeMathComponent<MathOperatorSyntaxComponent>(`math_parenthesis`, `ρ`),
+  // math_array: makeMathComponent<MathOperatorSyntaxComponent>(`math_array`, `β`),
 } as Partial<Record<MathSyntaxNames, SyntaxComponent>>
+
+export const MATH_SYNTAX_NAMES = Object.keys(MATH_SYNTAX_COMPONENTS) as MathSyntaxNames[]
+
+// export const MATH_REGEX_CHARACTERS = new RegExp(`(+|-|/|*|x|^)`, `g`)
 
 export function mathJSNodeTypeToSyntaxName(nodeType: MathJSNodeTypes): MathSyntaxNames {
   switch (nodeType) {
@@ -73,16 +76,18 @@ export function mathJSNodeTypeToSyntaxName(nodeType: MathJSNodeTypes): MathSynta
       return `math_operator`
     case `FunctionNode`:
       return `math_function`
-    case `SymbolNode`:
-      return `math_symbol`
-    case `ConstantNode`:
-      return `math_constant`
-    case `ParenthesisNode`:
-      return `math_parenthesis`
-    case `ArrayNode`:
-      return `math_array`
+    // case `SymbolNode`:
+    //   return `math_symbol`
+    // case `ConstantNode`:
+    //   return `math_constant`
+    // case `ParenthesisNode`:
+    //   return `math_parenthesis`
+    // case `ArrayNode`:
+    //   return `math_array`
   }
 
   // ERROR: Unimplemented mathjs node type
   debugger
+
+  return null as any
 }

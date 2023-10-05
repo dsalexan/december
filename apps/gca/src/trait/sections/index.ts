@@ -16,6 +16,9 @@ import { TraitFeature, TraitFeatureSchema } from "./feature"
 import { TraitCulture, TraitCultureSchema } from "./culture"
 import { TraitLanguage, TraitLanguageSchema } from "./language"
 
+export const TRAIT_PREFIX_TAGS = [`ST`, `AD`, `PE`, `DI`, `QU`, `SK`, `SP`, `TE`, `EQ`, `GR`, `LI`] as const
+export type TraitPrefixTag = (typeof TRAIT_PREFIX_TAGS)[number]
+
 export const TRAIT_SCHEMAS = {
   attributes: TraitAttributeSchema,
   languages: TraitLanguageSchema,

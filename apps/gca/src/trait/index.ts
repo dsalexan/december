@@ -4,16 +4,19 @@ import { isNilOrEmpty, typing } from "@december/utils"
 import { TraitParser } from "./parser"
 
 import churchill from "../logger"
-import TraitTag, { TRAIT_TAG_NAMES, TraitTagName } from "./tag/tag"
-import { cloneDeep, get, isNil, last, range, uniq } from "lodash"
+import TraitTag from "./tag"
+import { cloneDeep, get, isNil, isNumber, isSymbol, last, max, range, set, uniq } from "lodash"
 import { NullableLogBuilder } from "@december/churchill"
 import chalk from "chalk"
-import { TraitError, TraitErrorManager, getHighestErrorPriority } from "./error"
 import { SuperchargedTraitData, TRAIT_SCHEMAS, TraitDefinition } from "./sections"
 import { TraitSection } from "./sections/types"
-import { isOnlybornAnd } from "./parser/node/utils"
+import { hasOnlybornAnd, isOnlybornAnd } from "./parser/node/utils"
 import { SYNTAX_COMPONENTS } from "./parser/syntax"
-import { TraitParserNode } from "./parser/node"
+import { TAGS, TagName } from "./tag/tag"
+import { ISSUE_PRIORITY, TraitIssueManager, createTraitIssue, maxIssuesPriority } from "./issues"
+import LogBuilder from "@december/churchill/src/builder"
+import { LAZY_VALUE, UNPARSED_VALUE } from "./tag/value"
+import { guessType } from "@december/utils/src/typing"
 
 export const logger = churchill.child({ name: `trait` })
 
@@ -22,6 +25,8 @@ export type TraitPipeline = (typeof TRAIT_PILELINES)[number]
 
 // determines that a specific value for a trait was not defined (although it is different than undefined, which can exist)
 export const UNDEFINED_VALUE = Symbol.for(`UNDEFINED_VALUE`)
+
+type TraitDataTransformation = { type: `set` | `array_to_object`; tag: TagName; path: (string | number)[]; value: unknown }
 
 export default class Trait<TDefinition extends TraitDefinition = TraitDefinition> {
   _id: string // na pratica é a linha do trait dentro do arquivo .fst, what i call "GCA ID"
@@ -33,37 +38,71 @@ export default class Trait<TDefinition extends TraitDefinition = TraitDefinition
   _raw: string
   _parser!: TraitParser
 
-  _errors: TraitErrorManager
-
-  _tags: Partial<Record<TraitTagName, TraitTag>> = {}
+  _tags: Partial<Record<TagName, TraitTag>> = {}
   _data!: TDefinition[`Data`]
+  _mounts: { tag: Partial<Record<TagName, (string | number)[][]>>; path: Record<string, TagName[]> } = { tag: {}, path: {} } // index relating a tag to the final path of mounting
+  _transformations: TraitDataTransformation[] = []
 
   section!: TraitSection
   book?: string
   parent?: Trait
 
-  get data(): SuperchargedTraitData<TDefinition> {
-    const data = this._data
-    return {
-      ...data, //
-      fullname: data.name,
-      // fullname: (data.nameext as any) === UNDEFINED_VALUE || data.nameext === `` || data.nameext === undefined ? data.name : `${data.name} (${data.nameext})`,
-    }
-  }
-
-  constructor(raw: string, id: string | number, row: { fst: number; fstndx: number }) {
+  constructor(raw: string, id: string | number, row: { fst: number; fstndx: number }, parent?: Trait, book?: string) {
     this._raw = raw
     this._id = id.toString()
     this._row = row
 
-    this._errors = new TraitErrorManager(this)
+    this.parent = parent
+    this.book = book
   }
 
-  getHighestErrorPriority(pipeline?: TraitPipeline) {
-    return this._errors.getHighestErrorPriority(pipeline)
+  data(): TDefinition[`Data`] {
+    const data = this._data
+
+    return data
+
+    // const dataWithoutLazyValues = this.dataWithoutLazyValues()
+
+    // const hasNameext = (dataWithoutLazyValues.nameext as any) !== UNDEFINED_VALUE && dataWithoutLazyValues.nameext !== `` && !isNil(dataWithoutLazyValues.nameext)
+
+    // // fill some default getters
+    // return {
+    //   ...data, //
+    //   fullname: !hasNameext ? data.name : `${data.name} (${data.nameext})`,
+    // }
   }
 
-  parse(log?: NullableLogBuilder, parent?: Trait, book?: string) {
+  parse(issues: TraitIssueManager, log?: NullableLogBuilder) {
+    this._run(`parse`, issues, log)
+  }
+
+  compile(issues: TraitIssueManager, log?: NullableLogBuilder) {
+    this._run(`compile`, issues, log)
+  }
+
+  mount(issues: TraitIssueManager, log?: NullableLogBuilder) {
+    this._run(`mount`, issues, log)
+  }
+
+  validate(issues: TraitIssueManager, log?: NullableLogBuilder) {
+    this._run(`validate`, issues, log)
+  }
+
+  _run(pipeline: TraitPipeline, issues: TraitIssueManager, log?: NullableLogBuilder) {
+    if (log) log.add(pipeline).verbose().tab()
+
+    if (pipeline === `parse`) this._parse(issues, log)
+    else if (pipeline === `compile`) this._compile(issues, log)
+    else if (pipeline === `mount`) this._mount(issues, log)
+    else if (pipeline === `validate`) this._validate(issues, log)
+    else {
+      // ERROR: Unimplemented pipeline
+      debugger
+    }
+    if (log) this._logPipeline(issues, `parse`, log).tab(-1)
+  }
+
+  _parse(issues: TraitIssueManager, log?: NullableLogBuilder) {
     let raw = this._raw
 
     const startsWithComma = raw.startsWith(`,`)
@@ -71,35 +110,21 @@ export default class Trait<TDefinition extends TraitDefinition = TraitDefinition
 
     raw = `⟨${raw.trim()}⟩` // we pretend there is an parenthesis enclosure around this, as seen when instantiating root node
 
-    this.parent = parent
-    this.book = book
-
-    // reset errors in manager
-    this._errors.clear(`parse`)
-
-    if (log) {
-      log.add(`parse`).verbose()
-      log.tab()
-      log.add(chalk.grey(raw)).verbose()
-    }
+    if (log)
+      log
+        .add(chalk.italic(`(${raw.length})`))
+        .add(chalk.grey(raw))
+        .verbose()
 
     try {
       this._parser = new TraitParser(raw)
-      this._parser.parse()
+      this._parser.parse(log)
     } catch (ex) {
       debugger
     }
-
-    if (log) {
-      const numberOfErrors = this._errors.count(`parse`)
-      if (numberOfErrors === 0) log.add(chalk.italic.gray(`no parsing errors`)).verbose({ duration: true })
-      else log.add(chalk.italic(`${chalk.bgYellow.bold(` ${numberOfErrors} `)} mounting error${numberOfErrors === 1 ? `` : `s`}`)).verbose({ duration: true })
-
-      log.tab(-1)
-    }
   }
 
-  compile(log?: NullableLogBuilder) {
+  _compile(issues: TraitIssueManager, log?: NullableLogBuilder) {
     const root = this._parser.root
 
     // ERROR: Root must be imaginary
@@ -108,180 +133,229 @@ export default class Trait<TDefinition extends TraitDefinition = TraitDefinition
     // ERROR: There must be offspring
     if (root.children.length === 0) debugger
 
-    if (log) {
-      log.add(`compile`).verbose()
-      root.children[0].print({
-        log,
-        levels: [2],
-        calculateLevels: [2],
-        sections: [`text`, `nodes`],
-        lineSizeWithoutLevenPadding: 210,
-        onlyRelevantSource: true,
-        boldString: true,
-        colorInnerOnlyEnclosure: true,
-        useParentColor: true,
-        dimNodes: true,
-      })
-      log.tab()
-    }
+    // if (log)
+    //   root.children[0].printer.print({
+    //     log,
+    //     levels: [2],
+    //     calculateLevels: [2],
+    //     sections: [`text`, `nodes`],
+    //     lineSizeWithoutLevenPadding: 210,
+    //     onlyRelevantSource: true,
+    //     boldString: true,
+    //     colorInnerOnlyEnclosure: true,
+    //     useParentColor: true,
+    //     dimNodes: true,
+    //   })
+
+    if (log) log.tab()
 
     // ERROR: First level child must be onlyborn AND comma
     const isOnlyborn = root.children.length === 1
     const isComma = root.children[0]?.syntax?.name === `comma`
     if (!isOnlyborn || !isComma) debugger
 
-    // reset errors in manager
-    this._errors.clear(`compile`)
-
     const separator = root.children[0]
     const lists = separator.children
 
-    // detect piping
-    const pipedIndexes = [] as number[]
+    const tags = {} as Record<TagName, TraitTag>
     for (let i = 0; i < lists.length; i++) {
       const list = lists[i]
 
-      // ERROR: Node is not a tag
-      if (!TraitTag.isNodeATag(list, this)) debugger
+      if (list.syntax.name === `nil` || isOnlybornAnd(list.children, [`nil`])) {
+        if (i === 0) continue
 
-      // check if value's first child is onlyborn and pipe
-      const valueNode = TraitTag.getValueNode(list)
-      if (isOnlybornAnd(valueNode.children, [`pipe`])) {
-        // value IS piped
-        pipedIndexes.push(i)
+        // if it has onlyborn and nil, just not the first on line, something is wrong
+        debugger
+      }
+
+      const tagName = list.children[0].substring.trim()
+      if (log) log.add(chalk.italic.grey(i)).add(tagName).verbose()
+
+      const tag = new TraitTag(this, list)
+      const localIssues = tag.parse()
+
+      issues.add(`compile`, ...localIssues)
+      if (maxIssuesPriority(localIssues) >= 2) {
+        debugger
+      }
+
+      if (log)
+        log
+          .add(
+            chalk.gray.italic(
+              `  ${
+                tag.values === UNPARSED_VALUE ? `UNPARSED` : tag.values.map(value => (isSymbol(value) ? value.toString().replace(`Symbol(`, ``).replace(`_VALUE)`, ``) : `PARSED`))
+              } (${localIssues.length} issues)`,
+            ),
+          )
+          .verbose({ duration: true })
+
+      tags[tag.name] = tag
+    }
+
+    if (log) log.tab(-1)
+
+    this._tags = tags
+  }
+
+  modes() {
+    const tag = this._tags[`mode` as TagName]
+    if (!tag) return 0
+
+    const nodes = tag.valueNode.children
+
+    if (isOnlybornAnd(nodes, [`pipe`])) {
+      // modes do have pipes
+
+      return nodes[0].middles.length + 1
+    }
+
+    // how do deal with multiple children here? {if (nodes.length > 1)}
+    //    in this cases would be something like mode(ModeName (Something in parenthesis))
+
+    // modes do not have pipes
+    return 1
+  }
+
+  _mount(issues: TraitIssueManager, log?: NullableLogBuilder) {
+    /**
+     * there are 2 types of data
+     *    root - transfered directly to data
+     *    mode - transfered to one of the N modes (N based on the qtd of pipes in mode tag)
+     *           those N modes are then transfered to data.modes
+     */
+
+    // split in root and modes
+    type Targets = `root` | `mode`
+
+    const M = this.modes()
+    const hasModes = M > 0
+    const byTarget = {
+      root: [],
+      mode: [],
+    } as Record<Targets, TraitTag[]>
+
+    for (const tag of Object.values(this._tags)) {
+      // dont bother mounting unparsed tags
+      if (!tag.isValueParsed) continue
+
+      const definition = TAGS[tag.name]
+      if (!definition) debugger
+
+      if (definition.mode && hasModes) {
+        byTarget.mode.push(tag)
       } else {
-        // value does not appear to be piped
+        byTarget.root.push(tag)
+      }
+    }
 
-        // there can be pipes not at first level
-        //    gives(...) is an example of this, its value can be quite complex of a statement
+    // transfer values based on targets
+    const transformations = [] as TraitDataTransformation[]
 
-        // check if there is a pipe in the first child level, but it is not onlyborn
-        if (valueNode.children.length > 1 && valueNode.children.some(node => node.syntax.name === `pipe`)) {
-          // ERROR: Untested
+    for (const target of Object.keys(byTarget) as Targets[]) {
+      const tags = byTarget[target]
+
+      for (const tag of tags) {
+        if (!tag.isValueParsed) debugger
+
+        const values = tag.values as any[]
+
+        if (target === `root`) {
+          transformations.push({ type: `set`, tag: tag.name, path: [tag.name], value: values[0] })
+        } else if (target === `mode`) {
+          // check for a mismtach
+          const numberOfValuesIsM = values.length === M
+          const onlyOneValue = values.length === 1
+
+          const isMistached = !(numberOfValuesIsM || onlyOneValue)
+
+          if (isMistached) {
+            issues.add(
+              `mount`,
+              createTraitIssue(`mismatched_number_of_nodes_in_tag`, {
+                trait: this,
+                tag,
+                node: tag.valueNode,
+                //
+                key: tag.name,
+                expected: M,
+                received: values.length,
+              }),
+            )
+          } else {
+            for (let modeIndex = 0; modeIndex < values.length; modeIndex++) {
+              let value = values[modeIndex]
+              let name = tag.name
+              if (name === `mode`) name = `name`
+
+              transformations.push({ type: `set`, tag: tag.name, path: [`modes`, modeIndex, name], value })
+            }
+          }
+        } else {
+          // ERROR: Unimplemented target transfer
           debugger
         }
       }
     }
 
-    // determine if piping is correct (same number of options for EVERY piped tag)
-    let PIPE_VARIANTS = 1
-    if (pipedIndexes.length > 0) {
-      const indexOfOptions = {} as Record<number, number[]>
+    // // add modes conversion from index to object as a transformation
+    // if (M > 0)
+    //   transformations.push({
+    //     type: `array_to_object`,
+    //     tag: `mode`,
+    //     path: [`modes`],
+    //     value: undefined,
+    //   })
 
-      for (let i = 0; i < pipedIndexes.length; i++) {
-        const list = lists[pipedIndexes[i]]
-        const valueNode = TraitTag.getValueNode(list)
-        const pipe = valueNode.children[0]
-
-        const numberOfOptions = pipe.middles.length
-        if (indexOfOptions[numberOfOptions] === undefined) indexOfOptions[numberOfOptions] = []
-        indexOfOptions[numberOfOptions].push(pipedIndexes[i])
-      }
-
-      const uniqNumberOfOptions = uniq(Object.keys(indexOfOptions).map(key => parseInt(key)))
-      if (uniqNumberOfOptions.length === 1) {
-        // PIPE IS CORRECT
-        PIPE_VARIANTS = uniqNumberOfOptions[0]
-      } else {
-        // this._parser.root.printCompact({ lineSizeWithoutLevenPadding: 240 })
-
-        for (const qtd of uniqNumberOfOptions) {
-          // choose smaller node (easier to debug)
-          const pool = indexOfOptions[qtd]
-
-          const nodePool = pool.map(index => ({ node: lists[index], substring: lists[index].substring.trim() })).sort((a, b) => a.substring.length - b.substring.length)
-
-          const node = nodePool[0].node
-
-          console.error(
-            chalk.bgGray.white(
-              `${` `.repeat(50)}${node.backgroundColor(` ${node.context} (${chalk.bold(`${node.children[0].substring.trim()}`)}) `)} has ${chalk.bold(qtd)} pipes (${
-                pool.length === 1 ? chalk.bgRed(`ONLY ONE`) : `one of ${chalk.bold(pool.length)}`
-              })${` `.repeat(50)}`,
-            ),
-          )
-
-          const pipe = node.children[1]
-          pipe.printRelevant({ sections: [`context`], lineSizeWithoutLevenPadding: 240, levels: range(pipe.level, pipe.level + 3), calculateLevels: [pipe.level] })
-          console.log(` `)
-        }
-
-        console.error(chalk.bgRed(`${` `.repeat(50)}Trait ${chalk.bold(this._row.fst)} at .fst${` `.repeat(50)}`))
-        this._parser.root.printCompact({ sections: [`text`], lineSizeWithoutLevenPadding: 240 })
-        // piping is not uniform across all piped tags, WHY?
-        debugger
-      }
-    }
-
-    const tags = {} as Record<TraitTagName, TraitTag>
-    for (let i = 0; i < lists.length; i++) {
-      const list = lists[i]
-
-      const isPiped = pipedIndexes.includes(i) // informs that value for tag IS piped (and conforming to pipe format across all other piped tags)
-
-      const tag = new TraitTag(this, list)
-      const result = tag.parse()
-
-      this._errors.add(`compile`, result.errors, { tag })
-      if (getHighestErrorPriority(result.errors) >= 2) {
-        debugger
-      }
-
-      tags[tag.name] = tag
-    }
-
-    if (log) {
-      const numberOfErrors = this._errors.count(`compile`)
-      if (numberOfErrors === 0) log.add(chalk.italic.gray(`no compilation errors`)).verbose({ duration: true })
-      else log.add(chalk.italic(`${chalk.bgYellow.bold(` ${numberOfErrors} `)} compilation error${numberOfErrors === 1 ? `` : `s`}`)).verbose({ duration: true })
-
-      log.tab(-1)
-    }
-
-    this._tags = tags
-  }
-
-  mount(log?: NullableLogBuilder) {
-    // reset errors in manager
-    this._errors.clear(`mount`)
-
-    if (log) log.add(`mount`).verbose().tab()
-
-    // reset values for trait (so in validate we can determine what is missing)
+    // apply transformations
+    const mounts = { tag: {}, path: {} } as typeof this._mounts
     const data = {} as any
 
-    // fill values based on already parsed tags ("compilation")
-    const tags = Object.values(this._tags)
-    for (let i = 0; i < tags.length; i++) {
-      const tag = tags[i]
+    //    order transformations by type priority
+    const typePriority = [`set`, `array_to_object`] as TraitDataTransformation[`type`][]
 
-      if (!tag.isValueParsed) {
-        // dont bother to mount unparsed values (types might not match and all)
-        // @ts-ignore
-        data[tag.name] = UNDEFINED_VALUE
-      } else {
-        // @ts-ignore
-        data[tag.name] = tag.value
+    for (const type of typePriority) {
+      const transformationsOfType = transformations.filter(t => t.type === type)
+
+      for (const { tag, path, value } of transformationsOfType) {
+        const _path = path.join(`.`)
+
+        if (mounts.tag[tag] === undefined) mounts.tag[tag] = []
+        if (mounts.path[_path] === undefined) mounts.path[_path] = []
+
+        if (type === `set`) {
+          set(data, path, value)
+        } else if (type === `array_to_object`) {
+          const array = get(data, path)
+          const entries = [] as any[]
+          for (const entry of array) {
+            let key = entry.name
+
+            // ERROR: Cannot convert a array to object if one of entries is missing the key
+            if (key === undefined) debugger
+
+            entries.push([key, entry])
+          }
+          const object = Object.fromEntries(entries)
+
+          set(data, path, object)
+        } else {
+          // ERROR: Transformation type not implemented
+          debugger
+        }
+
+        mounts.tag[tag]?.push(path)
+        mounts.path[_path]?.push(tag)
       }
     }
 
+    // save everything
     this._data = data
-
-    if (log) {
-      const numberOfErrors = this._errors.count(`mount`)
-      if (numberOfErrors === 0) log.add(chalk.italic.gray(`no mounting errors`)).verbose({ duration: true })
-      else log.add(chalk.italic(`${chalk.bgYellow.bold(` ${numberOfErrors} `)} mounting error${numberOfErrors === 1 ? `` : `s`}`)).verbose({ duration: true })
-
-      log.tab(-1)
-    }
+    this._mounts = mounts
+    this._transformations = transformations
   }
 
-  validate(log?: NullableLogBuilder) {
-    // reset errors in manager
-    this._errors.clear(`validate`)
-
-    if (log) log.add(`validate`).verbose().tab()
-
+  _validate(issues: TraitIssueManager, log?: NullableLogBuilder) {
     if (isNilOrEmpty(this._id)) throw new Error(`Invalid trait ID: ${this._id}`)
     if (isNil(this._row.fst)) throw new Error(`Invalid .fst row: ${this._row.fst}`)
     if (isNil(this._row.fstndx)) throw new Error(`Invalid .fstndx row: ${this._row.fstndx}`)
@@ -294,79 +368,82 @@ export default class Trait<TDefinition extends TraitDefinition = TraitDefinition
       // ERROR: Unimplemented schema for section
       debugger
     } else {
-      try {
-        const data = this.data
-        const result = schema.safeParse(data)
+      const data = this.data()
+      const result = schema.safeParse(data)
 
-        if (!result.success) {
-          const errors = result.error.errors
+      if (!result.success) {
+        const errors = result.error.errors
 
-          for (const error of errors) {
-            const { code } = error
+        // for each zod error, parse into trait issue
+        for (const error of errors) {
+          const { code } = error
 
-            if (code === `unrecognized_keys`) {
-              const keysAndTypes = [] as { key: string; type?: VariableType }[]
-              for (const key of error.keys) {
-                const value = data[key as keyof typeof data]
+          const value = get(data, error.path)
+          // if value was never defined (most key was not declared as a possible tag name) ignore it. there is already another error to handle this shit
+          if (value === UNDEFINED_VALUE || value === UNPARSED_VALUE || value === LAZY_VALUE) continue
 
-                let type: VariableType | undefined
-                if (value === UNDEFINED_VALUE) {
-                  // if value was never defined (most key was not declared as a possible tag name)
-                  // we try to guess the type based on trait._value
-                  const tag = this._tags[key as TraitTagName]!
-                  if (tag === undefined) {
-                    // ERROR: Tag not found, probably some mistake in indexing
-                    debugger
-                  }
+          if (code === `invalid_type`) {
+            issues.add(
+              `validate`,
+              createTraitIssue(`type_differs_from_schema`, {
+                trait: this,
+                node: this._parser.root,
+                //
+                path: error.path,
+                expected: error.expected,
+                received: error.received,
+              }),
+            )
+          } else if (code === `unrecognized_keys`) {
+            for (const key of error.keys) {
+              const path = [...error.path, key]
 
-                  type = tag.valueNode.children[0].guessType() as any
-                } else type = typing.guessType(value)
+              const _tags = uniq(this._mounts.path[path.join(`.`)])
+              const tags = _tags.map(tag => this._tags[tag])
+              if (tags.length === 0) debugger // wtf
+              if (tags.length > 1) debugger // ERROR: Untested
 
-                keysAndTypes.push({ key, type })
-              }
+              const value = get(data, path)
+              const type = guessType(value)
+              if (isNilOrEmpty(type)) debugger
 
-              this._errors.add(`validate`, { unschemaedKeys: keysAndTypes }, { trait: this })
-            } else if (code === `invalid_type`) {
-              const definedPaths = [] as (string | number)[]
-
-              for (const path of error.path) {
-                const value = get(data, path)
-
-                if (value === UNDEFINED_VALUE) {
-                  // if value was never defined (most key was not declared as a possible tag name) ignore it. there is already another error to handle this shit
-                  continue
-                }
-
-                debugger
-                definedPaths.push(path)
-              }
-
-              if (definedPaths.length > 0) {
-                // ERROR: Unimplemented error for invalid type in defined tags
-                debugger
-                // this._errors.add(`validate`, { unschemaedKeys: keysAndTypes }, { trait: this })
-              }
-            } else {
-              console.error(chalk.bgRed(`${` `.repeat(50)}Unimplemented schema error code "${chalk.bold(code)}"${` `.repeat(50)}`))
-
-              // ERROR: Unimplemented schema error code
-              debugger
+              issues.add(
+                `validate`,
+                createTraitIssue(`missing_key_in_schema`, {
+                  trait: this,
+                  tag: tags[0],
+                  node: tags[0]!.valueNode,
+                  //
+                  key: path.join(`.`),
+                  types: [type],
+                }),
+              )
             }
+          } else {
+            console.error(chalk.bgRed(`${` `.repeat(50)}Unimplemented schema error code "${chalk.bold(code)}"${` `.repeat(50)}`))
+
+            // ERROR: Unimplemented schema error code
+            debugger
           }
-        } else {
-          debugger
         }
-      } catch (ex) {
-        // just go, testing time
+      } else {
+        // just go on, apparently this trait is ok
       }
     }
+  }
 
-    if (log) {
-      const numberOfErrors = this._errors.count(`validate`)
-      if (numberOfErrors === 0) log.add(chalk.italic.gray(`no validating errors`)).verbose({ duration: true })
-      else log.add(chalk.italic(`${chalk.bgYellow.bold(` ${numberOfErrors} `)} validating error${numberOfErrors === 1 ? `` : `s`}`)).verbose({ duration: true })
+  _logPipeline(issues: TraitIssueManager, pipeline: TraitPipeline, log: LogBuilder) {
+    const gerund = {
+      parse: `parsing`,
+      compile: `compiling`,
+      mount: `mounting`,
+      validate: `validating`,
+    }[pipeline]
 
-      log.tab(-1)
-    }
+    const numberOfErrors = issues.count(this, pipeline)
+    if (numberOfErrors === 0) log.add(chalk.italic.gray(`no ${gerund} errors`)).verbose({ duration: true })
+    else log.add(chalk.italic(`${chalk.bgYellow.bold(` ${numberOfErrors} `)} ${gerund} error${numberOfErrors === 1 ? `` : `s`}`)).verbose({ duration: true })
+
+    return log
   }
 }

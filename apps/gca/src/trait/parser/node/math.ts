@@ -32,6 +32,8 @@ export class MathNodeParser {
 
     let node = null as any as TraitParserNode
 
+    const DEBUG_TO_STRING = (mathNode as any)._toString()
+
     if (mathNode.type === `ConstantNode` || mathNode.type === `SymbolNode`) {
       const string = toString(mathNode, _options)
       let data = {} as any
@@ -49,8 +51,9 @@ export class MathNodeParser {
     } else if (mathNode.type === `ParenthesisNode`) {
       node = this.parseParenthesisNode((mathNode as ParenthesisNode).content, cursor, true, _options)
     } else if (mathNode.type === `ArrayNode`) {
+      debugger
       // advance cursor once to account for open brackets
-      node = new TraitParserNode(this.parser, null, 0, cursor++, SYNTAX_COMPONENTS.math_array)
+      node = new TraitParserNode(this.parser, null, 0, cursor++, SYNTAX_COMPONENTS.list) // .math_array
 
       for (const item of (mathNode as ArrayNode).items) {
         const child = this.parseNode(item, cursor, _options)
@@ -61,8 +64,17 @@ export class MathNodeParser {
       // advance cursor once to account for open brackets
       node.end = last(node.children)!.end! + 1
       cursor += node.end! - node.start
+    } else if (mathNode.type === `RangeNode`) {
+      debugger
     } else {
       // ERROR: Unimplemented node type
+
+      /**
+       * How to implement?
+       *
+       * - Go to type node in mathjs (mathjs/lib/esm/expression/node/<NodeType>.js)
+       * - Check "DEBUG_TO_STRING"
+       */
       debugger
     }
 
@@ -143,7 +155,7 @@ export class MathNodeParser {
 
     if (wrapParens) {
       // create left parenthesis node and advance cursor by one, accounting for open parens
-      parenthesisNode = new TraitParserNode(this.parser, null, 0, cursor++, SYNTAX_COMPONENTS.math_parenthesis)
+      parenthesisNode = new TraitParserNode(this.parser, null, 0, cursor++, SYNTAX_COMPONENTS.parenthesis) // .math_parenthesis
     }
 
     // create left hand side at cursor (parseNode always returns a balanced node)
@@ -169,7 +181,7 @@ export class MathNodeParser {
 
       let start = 0
 
-      const constant = new TraitParserNode(this.parser, null, 0, start, SYNTAX_COMPONENTS.math_constant)
+      const constant = new TraitParserNode(this.parser, null, 0, start, SYNTAX_COMPONENTS.math_variable) // .math_constant
       constant.end = start + string.length - 1
       // components.push(...constantNodeToString(node as ConstantNode, _options))
     } else if (node.type === `OperatorNode`) {

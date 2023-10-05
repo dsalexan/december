@@ -126,6 +126,12 @@ export default class LogBuilder {
     return this
   }
 
+  space(length: number, character = ` `): this {
+    this.add(character.repeat(length))
+
+    return this
+  }
+
   buildForTerminal({ colorize = false, separator = ` ` }: LogBuilderBuildOptions = {}) {
     const text = this.components.map(component => component.buildForTerminal({ colorize, baseStyle: this.style })).join(separator)
 

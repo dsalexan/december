@@ -203,4 +203,14 @@ export class FastIndex {
       .add(`Indexing extracted ${chalk.bold(modifiers.data.length)} modifiers.`)
       .verboseWithDuration()
   }
+
+  save(filename: string, directory = `.`) {
+    const sections = Object.entries(this.traits.byRow).map(([row, id]) => {
+      const trait = this.traits.byID[id]
+
+      return `${trait._row}    ${trait.section}    ${trait.name}    ${trait.nameext}`
+    })
+
+    fs.writeFileSync(path.join(directory, filename), sections.join(`\n`))
+  }
 }
